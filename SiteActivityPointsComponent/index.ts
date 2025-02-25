@@ -1,20 +1,25 @@
 import { IInputs, IOutputs } from "./generated/ManifestTypes";
 import * as geoJSONUtils from "./utilities/geojson-utils";
+import * as config from "./configuration/configuration";
 import DataSetInterfaces = ComponentFramework.PropertyHelper.DataSetApi;
 type DataSet = ComponentFramework.PropertyTypes.DataSet;
 
 export class SiteActivityPointsComponent implements ComponentFramework.StandardControl<IInputs, IOutputs> {
-    private _container: HTMLDivElement;
-    private _context: ComponentFramework.Context<IInputs>;
-    private _notifyOutputChanged: () => void;
+    private container: HTMLDivElement;
+    private context: ComponentFramework.Context<IInputs>;
+    private notifyOutputChanged: () => void;
 
-    private _map: google.maps.Map | null = null;
-    private _kmlUrl: string | null = null;
-    private _initialLat = 0;
-    private _initialLng = 0;
-    private _initialZoom = 12;
-    private _locationDataset: ComponentFramework.PropertyTypes.DataSet;
-    private _geoJSON: geoJSONUtils.GeoJsonFeatureCollection;
+    // private _map: google.maps.Map | null = null;
+    private kmlUrl: string | null = null;
+    private initialLat = 0;
+    private initialLng = 0;
+    private initialZoom = 13;
+    private locationDataset: ComponentFramework.PropertyTypes.DataSet;
+    private geoJSON: geoJSONUtils.GeoJsonFeatureCollection;
+    private initialLocationTableName: string;
+    private initialFileColumnName: string;
+    private initialLatitudeColumnName: string;
+    private initialLongitudeColumnName: string;
 
     constructor() {}
 
@@ -24,45 +29,24 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
         state: ComponentFramework.Dictionary,
         container: HTMLDivElement
     ): Promise<void> {
-        this._container = container;
-        this._context = context;
-        this._locationDataset = context.parameters.locationDataSet;
+        this.container = container;
+        this.context = context;
+        this.locationDataset = context.parameters.locationDataSet;
 
-        // console.log('DATAset: ', this._locationDataset);
-        
-        // this.relatedTableDataset = context.parameters.relatedTableDataSet;
-        // console.log('Related Table Dataset: ', this.relatedTableDataset);
+        console.log('CONTEXT: ', this.context);
 
-        // context.parameters._locationDataset.linking.addLinkedEntity({
-        //     name: "fot_sitemaptest",
-        //     from: "fot_sitemaptestid",
-        //     to: "fot_sitemaptest",
-        //     alias: "ParentRelation",
-        //     linkType: "outer"
-        // });
+        this.container.style.width = "100%";
+        this.container.style.height = "800px";   
+        this.initializeParameters();     
+        console.log('Params initialLocationTableName: ', this.initialLocationTableName);
+        console.log('Params initialFileColumnName: ', this.initialFileColumnName);
+        console.log('Params initialLatitudeColumnName: ', this.initialLatitudeColumnName);
+        console.log('Params initialLongitudeColumnName: ', this.initialLongitudeColumnName);
 
-        // const linkedEntities = context.parameters._locationDataset.linking.getLinkedEntities();
-        // console.log('Linked Entities: ', linkedEntities);
-        
-        // initializeData?
-        this._container.style.width = "100%";
-        this._container.style.height = "800px";        
-
-        // await this.getData( this._locationDataset);
-
-        // this.loadGoogleMaps().then(() => {
-        //     console.log("Google Maps API loaded successfully.");
-        //     this.initializeMap();
-        //     return true;
-        // }).catch(error => {
-        //     console.error("Google Maps API failed to load:", error);
-        //     throw error;
-        // });
-
-        this.getData( this._locationDataset).then(async () => {
-            console.log('DATAset: ', this._locationDataset);
+        this.initializeData( this.locationDataset).then(async () => {
+            console.log('DATAset: ', this.locationDataset);
             try {
-                await this.loadGoogleMaps(this._context.parameters.googleApiKey.raw as string);
+                await this.loadGoogleMaps(this.context.parameters.googleApiKey.raw as string);
                 console.log("Google Maps API loaded successfully.");
                 return this.initializeMap();
             } catch (error) {
@@ -75,27 +59,28 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
         });                 
     }
 
-    private async getData(dataset: ComponentFramework.PropertyTypes.DataSet): Promise<void> {
-        // (dataset as any).addColumn("fot_sitedesignfileurlplaintext", "ParentRelation");
+    private initializeParameters(): void {
+        this.initialLocationTableName = this.context.parameters.initialLocationTableName.raw as string || config.initialLocationTableName;
+        this.initialFileColumnName = this.context.parameters.initialFileColumnName.raw as string || config.initialFileColumnName;
+        this.initialLatitudeColumnName = this.context.parameters.initialLatitudeColumnName.raw as string || config.initialLatitudeColumnName;
+        this.initialLongitudeColumnName = this.context.parameters.initialLongitudeColumnName.raw as string || config.initialLongitudeColumnName;
+    }
 
-        if (dataset?.sortedRecordIds && dataset.setSelectedRecordIds.length) {
+    private async initializeData(dataset: ComponentFramework.PropertyTypes.DataSet): Promise<void> {
+        const initialLocationEntityId = this.getInitialLocationEntityId();
+        console.log('Initial location entity id: ', initialLocationEntityId);
+        const initialLocationData = await this.getInitialLocationData(initialLocationEntityId);
 
-            const initialLocationData = await this.getInitialLocationData(dataset.sortedRecordIds[0]);
+        this.kmlUrl = this.getGoogleDriveDownloadLink(this.getGoogleDriveFileId(initialLocationData?.kmlUrl || null));
+        this.initialLat = initialLocationData?.initialLatitude || 0;
+        this.initialLng = initialLocationData?.initialLongitude || 0;
+        console.log ('initial location data: ', initialLocationData);
 
-            this._kmlUrl = this.getGoogleDriveDownloadLink(this.getGoogleDriveFileId(initialLocationData?.kmlUrl || null));
-            this._initialLat = initialLocationData?.initialLatitude || 0;
-            this._initialLng = initialLocationData?.initialLongitude || 0;
-            // this._kmlUrl = await this.getKmlUrl(dataset.sortedRecordIds[0]);
-            console.log ('initial location data: ', initialLocationData);
+        if (dataset?.sortedRecordIds && dataset?.sortedRecordIds.length) {
             
             const coordinates = dataset.sortedRecordIds.reduce(
                 (arr: { latitude: number; longitude: number; properties?: geoJSONUtils.GeoJsonProperties }[], recordId) => {
                 const record = dataset.records[recordId];
-                // const latitude = record.getValue('latitude');
-                // const longitude = record.getValue('longitude');
-                // const name = record.getValue('name'); 
-                // const description = record.getValue('description'); 
-
                 arr.push({
                     latitude: (record.getValue('latitude') as number),
                     longitude: (record.getValue('longitude') as number),
@@ -104,24 +89,27 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
                         description: record.getValue('description') as string
                     }
                 });
-
                 return arr;
             },[]);
 
-            this._geoJSON = geoJSONUtils.generateGeoJson(coordinates);
-            console.log('GeoJSON: ', this._geoJSON);
+            this.geoJSON = geoJSONUtils.generateGeoJson(coordinates);
+            console.log('GeoJSON: ', this.geoJSON);
         }
     }
 
-    private async getInitialLocationData(id: string): Promise<{ kmlUrl: string, initialLatitude: number, initialLongitude: number } | null> {
-    // private async getKmlUrl(id: string): Promise<string | null> {
-        const linkedRecord = this._locationDataset.records[id].getValue("siteTest"); 
-        const linkedRecordId = (linkedRecord as any).id.guid;
+    private getInitialLocationEntityId(): string | null {
+        const entityTypeName = (this.context as any).page?.entityTypeName;
+        console.log('Entity type name: ', entityTypeName);
+        return entityTypeName === this.initialLocationTableName ? (this.context as any).page?.entityId : null;
+    }
 
-        console.log('Site Id value: ', linkedRecordId); 
+    private async getInitialLocationData(initialLocationEntityId: string | null): Promise<{ kmlUrl: string, initialLatitude: number, initialLongitude: number } | null> {
+        if (!initialLocationEntityId) {
+            return null;
+        }
 
         try {
-            return await this.getInitialLocationDataFromLinkedEntity(linkedRecordId);            
+            return await this.getInitialLocationDataFromLinkedEntity(initialLocationEntityId);            
         } catch (error) {
             console.log('Error getting Url: ', error); 
             return null;
@@ -129,21 +117,11 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
     }
 
     private async getInitialLocationDataFromLinkedEntity(entityId: string): Promise<{ kmlUrl: string, initialLatitude: number, initialLongitude: number } | null> {
-        const linkedEntityTableName = this._context.parameters.initialLocationLinkedTableName.raw as string;
-        const initialKmlUrlColumnName = this._context.parameters.initialKmlUrlColumnName.raw as string;
-        const initialLatitudeColumnName = this._context.parameters.initialLatitudeColumnName.raw as string;
-        const initialLongitudeColumnName = this._context.parameters.initialLongitudeColumnName.raw as string;
-
-        console.log('Site linkedEntityTableName: ', linkedEntityTableName);
-        console.log('Site initialKmlUrlColumnName: ', initialKmlUrlColumnName);
-        console.log('Site initialLatitudeColumnName: ', initialLatitudeColumnName);
-        console.log('Site initialLongitudeColumnName: ', initialLongitudeColumnName);
-
         try {
-            const results = await this._context.webAPI.retrieveRecord(
-                linkedEntityTableName,
+            const results = await this.context.webAPI.retrieveRecord(
+                this.initialLocationTableName,
                 entityId,
-                `?$select=${initialKmlUrlColumnName},${initialLatitudeColumnName},${initialLongitudeColumnName}`
+                `?$select=${this.initialFileColumnName},${this.initialLatitudeColumnName},${this.initialLongitudeColumnName}`
             );
 
             console.log('Results from API call: ', results);
@@ -217,30 +195,76 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
      */
     private initializeMap(): void {
         
-        console.log('IN INITIALZE MAP CONTAINER: ', this._container);
-        console.log('IN INITIALZE MAP KML URL: ', this._kmlUrl);
-        console.log('IN INITIALZE MAP GEOJSON: ', this._geoJSON);
+        console.log('IN INITIALZE MAP CONTAINER: ', this.container);
+        console.log('IN INITIALZE MAP KML URL: ', this.kmlUrl);
+        console.log('IN INITIALZE MAP GEOJSON: ', this.geoJSON);
         
-        if (!this._container) return;
+        if (!this.container) return;
 
-        this._map = new google.maps.Map(this._container, {
-            center: { lat: this._initialLat, lng: this._initialLng }, 
-            // center: { lat: 42.6975, lng: 23.3242 }, 
-            zoom: this._initialZoom
+        const map = new google.maps.Map(this.container, {
+            center: { lat: this.initialLat, lng: this.initialLng }, 
+            zoom: this.initialZoom
         });
 
-        // If there's a KML file, add it to the map
-        if (this._kmlUrl) {
-            this.addKmlLayer(this._kmlUrl);
+        if (this.kmlUrl) {
+            // this.addKmlLayer(this.kmlUrl);
+            const kmlLayer = new google.maps.KmlLayer({
+                url: this.kmlUrl,
+                map,
+                preserveViewport: true
+            });
         }
 
-        this._map.data.addGeoJson(this._geoJSON);
+        map.data.addGeoJson(this.geoJSON);
 
+        console.log('MAP: ', map);
         // this.addGeoJSONListener();
-        this._map.data.addListener('mouseover', (event) => {
+        
+        // map.data.addListener('mouseover', (event) => {
+        //     const properties = event.feature.getProperties();
+        //     console.log('mouseover event: ', event);
+        //     console.log('properties: ', properties);
+
+        //     const name = event.feature.getProperty('name');
+        //     const description = event.feature.getProperty('description');
+        //     const position = event.latLng;
+        //     console.log('name: ', name);
+        //     console.log('description: ', description);
+        //     console.log('position: ', position);
+
+        //     const content = `
+        //       <div>
+        //         <h3>${properties.name}</h3>
+        //         <p>${properties.description}</p>
+        //       </div>
+        //     `;
+        
+        //     console.log('get geometry: ', event.feature.getGeometry());
+        //     console.log('get geomertry get: ', event.feature.getGeometry().get());
+
+        //     const infoWindow = new google.maps.InfoWindow({
+        //         content: content,
+        //         position: event.feature.getGeometry().get(),
+        //     });
+        
+        //     if (map) {
+        //         console.log('ABOUT TO OPEN INFO WINDOW')
+        //         infoWindow.open(map);
+        //     } 
+        // });
+        
+        map.data.addListener('click', function (event: any) {
             const properties = event.feature.getProperties();
-            console.log('mouseover event: ', event);
+            console.log('click event: ', event);
             console.log('properties: ', properties);
+
+            const name = event.feature.getProperty('name');
+            const description = event.feature.getProperty('description');
+            const position = event.latLng;
+            console.log('name: ', name);
+            console.log('description: ', description);
+            console.log('position: ', position);
+
             const content = `
               <div>
                 <h3>${properties.name}</h3>
@@ -256,9 +280,9 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
                 position: event.feature.getGeometry().get(),
             });
         
-            if (this._map) {
+            if (map) {
                 console.log('ABOUT TO OPEN INFO WINDOW')
-                infoWindow.open(this._map);
+                infoWindow.open(map);
             } 
         });
     }
@@ -266,59 +290,59 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
     /**
      * Adds a KML layer to the map.
      */
-    private addKmlLayer(kmlUrl: string): void {
-        if (!this._map) return;
+    // private addKmlLayer(kmlUrl: string): void {
+        // if (!this._map) return;
 
-        const kmlLayer = new google.maps.KmlLayer({
-            url: kmlUrl,
-            map: this._map,
-            preserveViewport: true
-        });
+        // const kmlLayer = new google.maps.KmlLayer({
+        //     url: kmlUrl,
+        //     map: this._map,
+        //     preserveViewport: true
+        // });
 
-        kmlLayer.addListener("status_changed", () => {
-            if (kmlLayer.getStatus() !== "OK") {
-                console.error("Error loading KML:", kmlLayer.getStatus());
-            }
-        });
-    }
+        // kmlLayer.addListener("status_changed", () => {
+        //     if (kmlLayer.getStatus() !== "OK") {
+        //         console.error("Error loading KML:", kmlLayer.getStatus());
+        //     }
+        // });
+    // }
 
-    private addGeoJSONListener(): void {
-        if (!this._map) {
-            return;
-        }
+    // private addGeoJSONListener(): void {
+    //     if (!this._map) {
+    //         return;
+    //     }
 
-        this._map.data.addListener('mouseover', (event) => {
-            const properties = event.feature.getProperties();
-            console.log('click event: ', event);
-            console.log('properties: ', properties);
-            const content = `
-              <div>
-                <h3>${properties.name}</h3>
-                <p>${properties.description}</p>
-              </div>
-            `;
+    //     this._map.data.addListener('mouseover', (event) => {
+    //         const properties = event.feature.getProperties();
+    //         console.log('click event: ', event);
+    //         console.log('properties: ', properties);
+    //         const content = `
+    //           <div>
+    //             <h3>${properties.name}</h3>
+    //             <p>${properties.description}</p>
+    //           </div>
+    //         `;
         
-            console.log('get geometry: ', event.feature.getGeometry());
-            console.log('get geomertry get: ', event.feature.getGeometry().get());
+    //         console.log('get geometry: ', event.feature.getGeometry());
+    //         console.log('get geomertry get: ', event.feature.getGeometry().get());
 
-            const infoWindow = new google.maps.InfoWindow({
-                content: content,
-                position: event.feature.getGeometry().get(),
-            });
+    //         const infoWindow = new google.maps.InfoWindow({
+    //             content: content,
+    //             position: event.feature.getGeometry().get(),
+    //         });
         
-            if (this._map) {
-                console.log('ABOUT TO OPEN INFO WINDOW')
-                infoWindow.open(this._map);
-            } 
-        });
-    }
+    //         if (this._map) {
+    //             console.log('ABOUT TO OPEN INFO WINDOW')
+    //             infoWindow.open(this._map);
+    //         } 
+    //     });
+    // }
 
     public updateView(context: ComponentFramework.Context<IInputs>): void {
-        // this.bindLookupDataset( this._locationDataset);
-        // this._locationDataset = context.parameters._locationDataset;
+        // this.bindLookupDataset( this.locationDataset);
+        // this.locationDataset = context.parameters.locationDataset;
 
-        // if (!this._locationDataset || this._locationDataset.loading) {
-        //     this._container.innerHTML = "Loading...";
+        // if (!this.locationDataset || this.locationDataset.loading) {
+        //     this.container.innerHTML = "Loading...";
         //     return;
         // }
 
@@ -352,7 +376,7 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
         //     outputHtml += "</ul>";
         // }
 
-        // this._container.innerHTML = outputHtml;
+        // this.container.innerHTML = outputHtml;
         // Here you would add your map component integration.
     }
 
@@ -363,6 +387,6 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
 
 
     public destroy(): void {
-        this._container.innerHTML = "";
+        this.container.innerHTML = "";
     }
 }

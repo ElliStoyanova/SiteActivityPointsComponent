@@ -1,0 +1,44 @@
+.gm-style-iw-chr .gm-style-iw-ch {
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.description, .category {
+    margin-top: 10px;
+}
+
+.description {
+    max-height: 100px;
+    overflow: auto;
+}
+
+.date-and-time-tag {
+    background-color: transparent;
+    border-radius: 4px;
+    color: #cc0000;
+    font-size: 11px;
+    /* padding: 4px 8px; */
+    /* position: relative; */
+}
+
+/* .date-and-time-tag {
+    background-color: #e84242;
+    border-radius: 4px;
+    color: white;
+    font-size: 11px;
+    padding: 4px 8px;
+    position: relative;
+} */
+  
+/* .date-and-time-tag::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: auto;
+    transform: translate(-50%, 0);
+    width: 0;
+    height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-top: 16px solid #e84242;
+} */

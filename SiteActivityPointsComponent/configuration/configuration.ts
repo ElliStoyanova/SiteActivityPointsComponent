@@ -4,4 +4,5 @@ export const initialFileUrlColumnName = 'fot_sitedesignfileurlplaintext';
 export const initialFileColumnName = 'fot_sitedesignfile';
 export const initialLatitudeColumnName = 'fot_latitude';
 export const initialLongitudeColumnName = 'fot_longitude';
+export const apiDataVersionUrlFragment = 'api/data/v9.2'
 

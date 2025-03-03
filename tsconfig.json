@@ -10,7 +10,11 @@
         "skipLibCheck": true,
         "jsx": "react",
         "allowSyntheticDefaultImports": true,
-        "typeRoots": ["node_modules/@types"]
+        "typeRoots": ["node_modules/@types"],
+        "baseUrl": ".",
+        "paths": {
+            "@assets/*": ["SiteActivityPointsComponent/assets/*"]
+        }
     },
     "include": [
         "**/*.ts",

@@ -1,3 +1,13 @@
 {
-    "outDir": "./out/controls"
+    "manifestVersion": 1,
+    "name": "SiteActivityPointsComponent",
+    "version": "1.0.0",
+    "controlNamespace": "MyNamespace",
+    "controlName": "SiteActivityPointsComponent",
+    "description": "My PCF Component",
+    "codePath": "src/index.ts",
+    "outDir": "./out/controls",
+    "assets": {
+        "assets": "SiteActivityPointsComponent/assets"
+    }
 }

@@ -1,7 +1,6 @@
 export function setStylesByFeatureType(feature: any) {
 
     const geometry = feature.getGeometry();
-    // console.log('STYLES: geometry: ', geometry);
     const geometryType = geometry?.getType();
     
     switch(geometryType) {
@@ -11,7 +10,7 @@ export function setStylesByFeatureType(feature: any) {
 
             return {
                 icon,
-                title
+                // title
             }
         }
         case 'LineString': {

@@ -1,6 +1,7 @@
 import { IInputs, IOutputs } from "./generated/ManifestTypes";
 import * as geoJSONBuildHelper from "./helpers/geojson-build-helper";
 import * as geoJSONStyleHelper from "./helpers/geojson-style-helper";
+import { getCenterAndZoomGeoJsonBounds } from "./helpers/geojson-center-and-zoom-helper";
 import * as config from "./configuration/configuration";
 import { kml } from "@tmcw/togeojson";
 import toGeoJSON from '@mapbox/togeojson';
@@ -171,7 +172,7 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
             console.log('Results from API call: ', results);
 
             
-            const downloadUrl = `${orgUrl}/api/data/v9.2/${this.initialLocationTableName}s(${entityId})/${this.initialFileColumnName}/$value`;
+            const downloadUrl = `${orgUrl}/${config.apiDataVersionUrlFragment}/${this.initialLocationTableName}s(${entityId})/${this.initialFileColumnName}/$value`;
             // const downloadUrl = `https://fot-dev.api.crm.dynamics.com/api/data/v9.2/${this.initialLocationTableName}(${entityId})/${this.initialFileColumnName}/$value`;
 
             console.log('Download Url: ', downloadUrl);
@@ -180,7 +181,9 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
             // console.log('KML Url from blob: ', kmlUrl);
             // const kmlUrl = await this.getKmlFromFile(results[this.initialFileColumnName]);
 
-            const initialGeoJSON = await this.getGeoJSONFromKmlFile(downloadUrl);            
+
+            const fileName = results[`${this.initialFileColumnName}_name`];
+            const initialGeoJSON = results[this.initialFileColumnName] ? await this.getInitialGeoJSON(downloadUrl, fileName): null;            
 
             if (results) {
                 return {
@@ -278,7 +281,8 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
         if (!this.container) return;
 
         this.map = new google.maps.Map(this.container, {
-            center: { lat: this.initialLat, lng: this.initialLng }, 
+            // center: { lat: this.initialLat, lng: this.initialLng }, 
+            center: { lat: 0, lng: 0 }, 
             zoom: this.initialZoom,
             mapId: 'DEMO_MAP_ID'
         } as any);
@@ -360,16 +364,10 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
             return;
         }
 
-        // const infoWindow = new google.maps.InfoWindow({
-        //     content: ''
-        // });
-
         this.map.data.addListener('click', (event: any) => {
 
-                // if (this.infoWindow.isOpen) {
-                    this.infoWindow.close();
-                    console.log('closed the info window!');
-                // }
+                this.infoWindow.close();
+                console.log('closed the info window!');
 
                 // console.log('Event: ', event);
                 // console.log('Event LAtLng: ', event.latLng);
@@ -417,56 +415,50 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
         );
     }
 
-    // private async getKmlFromFile(downloadUrl: string): Promise<string | null> {
-    private async getGeoJSONFromKmlFile(downloadUrl: string): Promise< FeatureCollection<Geometry | null, GeoJsonProperties> | null > {
-
-        // if(!fileReference) {
-        //     return null;
-        // }
-        // const downloadUrl = fileReference.downloadUrl;
-        // console.log('DOWNLOAD URL: ', downloadUrl);
+    private async getInitialGeoJSON(downloadUrl: string, fileName: string): Promise< FeatureCollection<Geometry | null, GeoJsonProperties> | null > {
         
         if(!downloadUrl) {
             return null;
         }
 
+        const fileNameFragments = fileName?.split('.');
+        console.log('file name fragments: ', fileNameFragments);
+        const fileExtension = fileNameFragments && fileNameFragments[fileNameFragments.length - 1] || '';        
+        console.log('file extension: ', fileExtension);
+
         return fetch(downloadUrl)
             .then(response => {
                 console.log('RESPONSE FROM FETCH CALL: ', response);
+                const contentDisposition = response.headers.get('Content-Disposition');
+                console.log('Content disposition: ', contentDisposition);
+                if (contentDisposition) {
+                    const filenameMatch = /filename="(.+)"/.exec(contentDisposition);
+                    if (filenameMatch && filenameMatch[1]) {
+                        const filename = filenameMatch[1];
+                        const extension = filename.substring(filename.lastIndexOf('.') + 1);
+                        console.log('File Extension From Content Disposition:', extension);
+                    }
+                }
+
                 return response.blob()
             })
             .then(blob => blob.text())
-            .then(kmlText => {
-                console.log('KML TEXT: ', kmlText);
-                // const parser = new DOMParser();
-                // const kmlDoc = parser.parseFromString(kmlText, 'text/xml');
-                // const initialGeoJSON = kml(kmlDoc);
+            .then(fileText => {
+                console.log('FILE TEXT: ', fileText);
 
-                // const dataUrl = 'data:application/vnd.google-earth.kml+xml;charset=utf-8,' + encodeURIComponent(kmlText);
-                // console.log('data Url: ', dataUrl);
-
-                // const kmlBlob = new Blob([kmlText], { type: 'application/vnd.google-earth.kml+xml' });
-                // console.log('object Url: ', URL.createObjectURL(kmlBlob));
-
-                console.log('GEOXML 3', geoXML3);
-                const kmlDoc = new DOMParser().parseFromString(kmlText, 'text/xml');
-                console.log('kmlDOC: ', kmlDoc);
-                const initialGeoJSON = toGeoJSON.kml(kmlDoc);
-
-                return initialGeoJSON;
-
-                // const serializer = new XMLSerializer();
-                // const kmlString = serializer.serializeToString(kmlDoc);
-                // console.log('KML STRING: ', kmlString);
-
-                // const kmlBlob = new Blob([kmlText], { type: 'application/vnd.google-earth.kml+xml' });
-                // return URL.createObjectURL(kmlBlob);
-
-                // const dataUrl = 'data:application/vnd.google-earth.kml+xml;charset=utf-8,' + encodeURIComponent(kmlString);
-                // const dataUrl = 'data:application/kml+xml;charset=utf-8,' + encodeURIComponent(kmlString);
-                // console.log('DATA URL: ', dataUrl);
-
-                // return dataUrl;
+                if (fileExtension === 'json' || fileExtension === 'geojson') {
+                    return JSON.parse(fileText);
+                } else if (fileExtension === 'kml') {
+                    console.log('GEOXML 3', geoXML3);
+                    const kmlDoc = new DOMParser().parseFromString(fileText, 'text/xml');
+                    console.log('fileDOC: ', kmlDoc);
+                    const initialGeoJSON = toGeoJSON.kml(kmlDoc);
+    
+                    return initialGeoJSON;
+                } else {
+                    console.error(`The file type .${fileExtension} is not supported.`);
+                    return null;
+                }                            
             })
             .catch(error => {
                 console.error("Error downloading or parsing KML:", error);
@@ -479,7 +471,11 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
             return;
         }
 
-        this.map.data.addGeoJson(geoJSON);
+        try {
+            this.map.data.addGeoJson(geoJSON);
+        } catch (error) {
+            console.error("Error adding GeoJSON:", error);
+        }
     }
 
     private displayGeoJSONFromDataSet(): void {
@@ -495,13 +491,13 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
 
             // console.log('Event: ', event);
 
-            console.log('feature: ', feature);
+            // console.log('feature: ', feature);
             const geometry = feature.geometry;
-            console.log('feature geometry: ', geometry);
+            // console.log('feature geometry: ', geometry);
             const dateAndTimeText = feature.properties?.['dateAndTime'] ? new Date(feature.properties?.['dateAndTime']).toLocaleString() : null ;
-            console.log('dateAndTimeText: ', dateAndTimeText);
+            // console.log('dateAndTimeText: ', dateAndTimeText);
             const dateAndTimeFragments = dateAndTimeText?.split(',');
-            const date = dateAndTimeFragments?.[0];
+            const date = dateAndTimeFragments?.[0] || '';
             const time = (dateAndTimeFragments?.[1])?.trim() || '';
             const name = feature.properties?.['name'];
             const description = feature.properties?.['description'];
@@ -518,20 +514,41 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
             dateAndTimeTag.className = 'date-and-time-tag';
             dateAndTimeTag.innerHTML = `<p>${date || ''}</p><p>${time || ''}</p>`;
 
-            const marker = new MarkerWithLabel({
-                position: latLng,
-                clickable: true,
-                map: this.map,
-                labelContent: dateAndTimeTag, // can also be HTMLElement
-                labelAnchor: new google.maps.Point(18, -40),
-                labelClass: 'date-and-time-tag'
-            });
-            // const marker = new this.AdvancedMarkerElement!({
+            // const marker = new MarkerWithLabel({
             //     position: latLng,
+            //     clickable: true,
             //     map: this.map,
-            //     // content: dateAndTimeTag,
-            //     gmpClickable: true,
+            //     labelContent: dateAndTimeTag, // can also be HTMLElement
+            //     labelAnchor: new google.maps.Point(18, -30),
+            //     labelClass: 'date-and-time-tag'
             // });
+
+            const markerContainer = document.createElement('div');
+            markerContainer.style.position = 'relative';
+
+            // const pinElement = document.createElement('img');
+            // pinElement.src = this.context.resources.getResource("assets/default_marker.png"); // Default pin image
+            const pinElement = document.createElement('div');
+            pinElement.className = 'marker-pin';
+            // pinElement.style.background = "url('https://maps.gstatic.com/mapfiles/api-3/images/spotlight-poi3_hdpi.png')";
+            // pinElement.style.width = '26px'; // Adjust the size of the pin
+            // pinElement.style.height = '37px';
+
+            // Create the label element
+            const labelElement = document.createElement('div');
+            labelElement.className = 'marker-label';
+            labelElement.innerHTML = `<p>${date || ''}</p><p>${time || ''}</p>`;
+
+            // Append the pin and label to the container
+            markerContainer.appendChild(pinElement);
+            markerContainer.appendChild(labelElement);
+
+            const marker = new this.AdvancedMarkerElement!({
+                position: latLng,
+                map: this.map,
+                content: markerContainer,
+                gmpClickable: true,
+            });
 
             // if (dateAndTimeText) {
             //     marker.content = dateAndTimeTag;
@@ -558,15 +575,19 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
             console.log('This GEOJSON: ', this.geoJSON);
 
             this.initializeMap();
-            // this.addKmlLayer(this.kmlUrl);
 
-            // this.attachAddFeatureEventListener();
             this.attachClickEventListener();
 
             this.addGeoJSONOnMap(this.initialGeoJSON);
+            const centerAndZoomBounds = this.initialGeoJSON ? getCenterAndZoomGeoJsonBounds(this.initialGeoJSON) : 
+                this.geoJSON ? getCenterAndZoomGeoJsonBounds(this.geoJSON) : null;
+            
+            if (centerAndZoomBounds) {
+                this.map?.fitBounds(centerAndZoomBounds);
+            }
+
             this.map?.data.setStyle(geoJSONStyleHelper.setStylesByFeatureType);
 
-            // this.addGeoJSONOnMap(this.geoJSON);
             this.displayGeoJSONFromDataSet();
             console.log('adding listener in updateView');
 

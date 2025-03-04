@@ -1,17 +1,14 @@
-import { IInputs, IOutputs } from "./generated/ManifestTypes";
-import * as geoJSONBuildHelper from "./helpers/geojson-build-helper";
-import * as geoJSONStyleHelper from "./helpers/geojson-style-helper";
-import { getCenterAndZoomGeoJsonBounds } from "./helpers/geojson-center-and-zoom-helper";
-import * as config from "./configuration/configuration";
-import { kml } from "@tmcw/togeojson";
+import { IInputs, IOutputs } from './generated/ManifestTypes';
+import * as geoJSONBuildHelper from './helpers/geojson-build-helper';
+import * as geoJSONStyleHelper from './helpers/geojson-style-helper';
+import { getCenterAndZoomGeoJsonBounds } from './helpers/geojson-center-and-zoom-helper';
+import * as config from './configuration/configuration';
 import toGeoJSON from '@mapbox/togeojson';
-// import { DOMParser } from 'xmldom';
-// import { DOMParser } from 'geoxml3';
 import * as geoXML3 from 'geoxml3';
-import DataSetInterfaces = ComponentFramework.PropertyHelper.DataSetApi;
-import { FeatureCollection, GeoJsonProperties, Geometry, Point } from "geojson";
-import { MarkerWithLabel } from "@googlemaps/markerwithlabel";
-type DataSet = ComponentFramework.PropertyTypes.DataSet;
+import { FeatureCollection, GeoJsonProperties, Geometry, Point } from 'geojson';
+import { kml } from "@tmcw/togeojson";
+import { MarkerWithLabel } from '@googlemaps/markerwithlabel';
+
 
 export class SiteActivityPointsComponent implements ComponentFramework.StandardControl<IInputs, IOutputs> {
     private container: HTMLDivElement;
@@ -25,16 +22,12 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
     });
     private kmlUrl: string | null = null;
     private initialGeoJSON: FeatureCollection<Geometry | null, GeoJsonProperties> | null;
-    private initialLat = 0;
-    private initialLng = 0;
-    private initialZoom = 13;
-    private locationDataset: ComponentFramework.PropertyTypes.DataSet;
     private geoJSON: FeatureCollection | null;
     private initialLocationTableName: string;
     private initialFileColumnName: string;
-    private initialFileUrlColumnName: string;
-    private initialLatitudeColumnName: string;
-    private initialLongitudeColumnName: string;
+    private initPromise: Promise<void> | null = null;
+    private markers: google.maps.marker.AdvancedMarkerElement[] = [];
+    private eventListeners: google.maps.MapsEventListener[] = [];
 
     constructor() {}
 
@@ -46,73 +39,99 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
     ): Promise<void> {
         this.container = container;
         this.context = context;
-        this.locationDataset = context.parameters.locationDataSet;
 
-        console.log('CONTEXT: ', this.context);
-        console.log('DATAset: ', this.locationDataset);
+        console.log('CONTEXT in init: ', this.context);
 
         this.container.style.width = "100%";
         this.container.style.height = "800px";   
         this.initializeParameters();     
         console.log('Params initialLocationTableName: ', this.initialLocationTableName);
-        console.log('Params initialFileUrlColumnName: ', this.initialFileUrlColumnName);
-        console.log('Params initialLatitudeColumnName: ', this.initialLatitudeColumnName);
-        console.log('Params initialLongitudeColumnName: ', this.initialLongitudeColumnName);
+        // console.log('Params initialFileUrlColumnName: ', this.initialFileUrlColumnName);
 
-        try {
-            await this.loadGoogleMaps(this.context.parameters.googleApiKey.raw as string);
-            console.log('Google Maps API loaded successfully.');
-            // return this.initializeMap()
-        } catch (error) {
-            console.error('Google Maps API failed to load:', error);
-            throw error;
-        }
+        this.initPromise = new Promise<void>((resolve, reject) => {
 
-        try {
-            const { AdvancedMarkerElement } = await google.maps.importLibrary("marker") as google.maps.MarkerLibrary;
-            this.AdvancedMarkerElement = AdvancedMarkerElement;
-        } catch (error) {
-            console.error('Cannot load Advanced Marker Elements');
-            throw error;
-        }
+            this.loadGoogleMaps(this.context.parameters.googleApiKey.raw as string)
+                .then(() => {
+                    console.log('Google Maps API loaded successfully.');
+                    return google.maps.importLibrary('marker') as Promise<google.maps.MarkerLibrary>;
+                })
+                .then(({ AdvancedMarkerElement }) => {
+                    this.AdvancedMarkerElement = AdvancedMarkerElement;
+                    this.initializeMap();
+                    this.attachClickEventListener();
+                    return this.getInitialGeoJSON();
+                })
+                .then((initialGeoJSON) => {
+                    this.initialGeoJSON = initialGeoJSON;
+                    console.log('INITIAL GEOJSON IN INIT(): ', JSON.stringify(this.initialGeoJSON));
+                    this.addGeoJSONOnMap(this.initialGeoJSON);
+                    this.applyCenterAndZoomBoundsOnMap(this.initialGeoJSON);
+                    this.applyInitialGeoJSONStyles();
+                    console.log('EVERYTHING IN INIT COMPLETED!');
+                    resolve();
+                    return;
+                })
+                .catch((error) => {
+                    console.error('Initialization error:', error);
+                    reject(error);
+                    return;
+                });
+            // try {
+            //     await this.loadGoogleMaps(this.context.parameters.googleApiKey.raw as string);
+            //     console.log('Google Maps API loaded successfully.');
 
-        // this.initializeData( this.locationDataset).then(async () => {
-        //     console.log('DATAset: ', this.locationDataset);
-        //     try {
-        //         await this.loadGoogleMaps(this.context.parameters.googleApiKey.raw as string);
-        //         console.log("Google Maps API loaded successfully.");
-        //         return this.initializeMap();
-        //     } catch (error) {
-        //         console.error("Google Maps API failed to load:", error);
-        //         throw error;
-        //     }
-        // }).catch(error => {
-        //     console.error("Error loading initial location data:", error);
-        //     throw error;
-        // });                 
+            //     const { AdvancedMarkerElement } = await google.maps.importLibrary('marker') as google.maps.MarkerLibrary;
+            //     this.AdvancedMarkerElement = AdvancedMarkerElement;
+        
+            //     this.initializeMap();
+        
+            //     this.attachClickEventListener();
+        
+            //     this.initialGeoJSON = await this.getInitialGeoJSON();
+        
+            //     console.log('INITIAL GEOJSON IN INIT(): ', JSON.stringify(this.initialGeoJSON));
+        
+            //     this.addGeoJSONOnMap(this.initialGeoJSON);
+        
+            //     this.applyCenterAndZoomBoundsOnMap(this.initialGeoJSON);
+        
+            //     this.applyInitialGeoJSONStyles();  
+
+            //     console.log('EVERYTHING IN INIT COMPLETED!');
+            //     resolve();
+            // } catch (error) {
+            //     console.error('Initialization error:', error);
+            //     reject(error);
+            // }            
+        });
+
+        return this.initPromise;                    
     }
 
     private initializeParameters(): void {
         this.initialLocationTableName = this.context.parameters.initialLocationTableName.raw as string || config.initialLocationTableName;
         this.initialFileColumnName = this.context.parameters.initialFileColumnName.raw as string || config.initialFileColumnName;
-        this.initialFileUrlColumnName = this.context.parameters.initialFileUrlColumnName.raw as string || config.initialFileUrlColumnName;
-        this.initialLatitudeColumnName = this.context.parameters.initialLatitudeColumnName.raw as string || config.initialLatitudeColumnName;
-        this.initialLongitudeColumnName = this.context.parameters.initialLongitudeColumnName.raw as string || config.initialLongitudeColumnName;
+        // this.initialFileUrlColumnName = this.context.parameters.initialFileUrlColumnName.raw as string || config.initialFileUrlColumnName;
     }
 
-    private async getLocationData(dataset: ComponentFramework.PropertyTypes.DataSet): Promise<void> {
+    private applyInitialGeoJSONStyles(): void {
+
+        if(!this.map) {
+            return;
+        }
+
+        this.map?.data.setStyle(geoJSONStyleHelper.setStylesByFeatureType);  
+    }
+
+    private async getInitialGeoJSON(): Promise<FeatureCollection<Geometry | null, GeoJsonProperties> | null> {
         const initialLocationEntityId = this.getInitialLocationEntityId();
-        console.log('Initial location entity id: ', initialLocationEntityId);
         const initialLocationData = await this.getInitialLocationData(initialLocationEntityId);
-
-        // this.kmlUrl = this.getGoogleDriveDownloadLink(this.getGoogleDriveFileId(initialLocationData?.kmlUrl || null));
-        this.initialGeoJSON = initialLocationData?.initialGeoJSON || null;
-        this.kmlUrl = initialLocationData?.kmlUrl || null;
-        this.initialLat = initialLocationData?.initialLatitude || 0;
-        this.initialLng = initialLocationData?.initialLongitude || 0;
+        
         console.log ('initial location data: ', initialLocationData);
-        console.log ('initial geoJSON: ', JSON.stringify(this.initialGeoJSON));
-
+        return initialLocationData?.initialGeoJSON || null;        
+    }
+ 
+    private getGeoJsonFromDataset(dataset: ComponentFramework.PropertyTypes.DataSet): FeatureCollection<Geometry, GeoJsonProperties> | null {
         if (dataset?.sortedRecordIds && dataset?.sortedRecordIds.length) {
             
             const coordinates = dataset.sortedRecordIds.reduce(
@@ -131,9 +150,10 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
                 return arr;
             },[]);
 
-            this.geoJSON = coordinates.length ? geoJSONBuildHelper.generateGeoJson(coordinates) : null;
-            console.log('GeoJSON: ', this.geoJSON);
+            return coordinates.length ? geoJSONBuildHelper.generateGeoJson(coordinates) : null;
         }
+
+        return null;
     }
 
     private getInitialLocationEntityId(): string | null {
@@ -143,7 +163,7 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
     }
 
     private async getInitialLocationData(initialLocationEntityId: string | null): 
-        Promise<{ kmlUrl: string | null, initialLatitude: number, initialLongitude: number, initialGeoJSON: FeatureCollection<Geometry | null, GeoJsonProperties> | null } | null> {
+        Promise<{ kmlUrl: string | null, initialGeoJSON: FeatureCollection<Geometry | null, GeoJsonProperties> | null } | null> {
         if (!initialLocationEntityId) {
             return null;
         }
@@ -157,7 +177,7 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
     }
 
     private async getInitialLocationDataFromLinkedEntityFile(entityId: string): 
-        Promise<{ kmlUrl: string | null, initialLatitude: number, initialLongitude: number, initialGeoJSON: FeatureCollection<Geometry | null, GeoJsonProperties> | null } | null> {
+        Promise<{ kmlUrl: string | null, initialGeoJSON: FeatureCollection<Geometry | null, GeoJsonProperties> | null } | null> {
         
         const orgUrl = (this.context as any).page.getClientUrl();
         console.log('ORG URL: ', orgUrl);
@@ -166,14 +186,13 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
             const results = await this.context.webAPI.retrieveRecord(
                 this.initialLocationTableName,
                 entityId,
-                `?$select=${this.initialFileColumnName},${this.initialLatitudeColumnName},${this.initialLongitudeColumnName}`
+                `?$select=${this.initialFileColumnName}`
             );
 
             console.log('Results from API call: ', results);
 
             
             const downloadUrl = `${orgUrl}/${config.apiDataVersionUrlFragment}/${this.initialLocationTableName}s(${entityId})/${this.initialFileColumnName}/$value`;
-            // const downloadUrl = `https://fot-dev.api.crm.dynamics.com/api/data/v9.2/${this.initialLocationTableName}(${entityId})/${this.initialFileColumnName}/$value`;
 
             console.log('Download Url: ', downloadUrl);
 
@@ -181,50 +200,45 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
             // console.log('KML Url from blob: ', kmlUrl);
             // const kmlUrl = await this.getKmlFromFile(results[this.initialFileColumnName]);
 
-
             const fileName = results[`${this.initialFileColumnName}_name`];
-            const initialGeoJSON = results[this.initialFileColumnName] ? await this.getInitialGeoJSON(downloadUrl, fileName): null;            
+            const initialGeoJSON = results[this.initialFileColumnName] ? await this.getInitialGeoJSONFromKml(downloadUrl, fileName): null;            
 
             if (results) {
                 return {
                     kmlUrl: null,
-                    initialLatitude: results[this.initialLatitudeColumnName],
-                    initialLongitude: results[this.initialLongitudeColumnName],
                     initialGeoJSON
                 }
             } else {
                 return null;
             }
         } catch (error) {
-            console.error("Error retrieving initial location data:", error);
+            console.error('Error retrieving initial location data:', error);
             return null;
         }
     }
 
-    private async getInitialLocationDataFromLinkedEntityUrl(entityId: string): Promise<{ kmlUrl: string, initialLatitude: number, initialLongitude: number } | null> {
-        try {
-            const results = await this.context.webAPI.retrieveRecord(
-                this.initialLocationTableName,
-                entityId,
-                `?$select=${this.initialFileUrlColumnName},${this.initialLatitudeColumnName},${this.initialLongitudeColumnName}`
-            );
+    // private async getInitialLocationDataFromLinkedEntityUrl(entityId: string): Promise<{ kmlUrl: string } | null> {
+    //     try {
+    //         const results = await this.context.webAPI.retrieveRecord(
+    //             this.initialLocationTableName,
+    //             entityId,
+    //             `?$select=${this.initialFileUrlColumnName}`
+    //         );
 
-            console.log('Results from API call: ', results);
+    //         console.log('Results from API call: ', results);
 
-            if (results) {
-                return {
-                    kmlUrl: results[this.initialFileUrlColumnName],
-                    initialLatitude: results[this.initialLatitudeColumnName],
-                    initialLongitude: results[this.initialLongitudeColumnName]
-                }
-            } else {
-                return null;
-            }
-        } catch (error) {
-            console.error("Error retrieving initial location data:", error);
-            return null;
-        }
-    }
+    //         if (results) {
+    //             return {
+    //                 kmlUrl: results[this.initialFileUrlColumnName]
+    //             }
+    //         } else {
+    //             return null;
+    //         }
+    //     } catch (error) {
+    //         console.error("Error retrieving initial location data:", error);
+    //         return null;
+    //     }
+    // }
 
     private loadGoogleMaps(googleApiKey: string): Promise<void> {
         return new Promise((resolve, reject) => {
@@ -281,23 +295,23 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
         if (!this.container) return;
 
         this.map = new google.maps.Map(this.container, {
-            // center: { lat: this.initialLat, lng: this.initialLng }, 
             center: { lat: 0, lng: 0 }, 
-            zoom: this.initialZoom,
+            // zoom: this.initialZoom,
             mapId: 'DEMO_MAP_ID'
         } as any);
         
         console.log('MAP: ', this.map);
+    }
 
-        this.map?.addListener('mapcapabilities_changed', () => {
-            const mapCapabilities = (this.map as any)?.getMapCapabilities();
-          
-            console.log('MAP capabilities: ', mapCapabilities);
-          });
-        
-        // this.map.addListener('click', (event) => {
-        //     console.log('MAP EVENT: ', event);
-        // });
+    private attachMapTypeIdChangeListener(): void {
+        this.map?.addListener('maptypeid_changed', () => {
+            const currentMapTypeId =this.map?.getMapTypeId();
+            if (currentMapTypeId === 'satellite') {
+                console.log("User switched to satellite view.");
+            } else {
+                console.log("User switched from satellite view to: " + currentMapTypeId);
+            }
+        });
     }
 
     private addKmlLayer(kmlUrl: string | null): void {
@@ -365,31 +379,16 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
         }
 
         this.map.data.addListener('click', (event: any) => {
-
                 this.infoWindow.close();
-                console.log('closed the info window!');
 
                 // console.log('Event: ', event);
-                // console.log('Event LAtLng: ', event.latLng);
                 const feature = event.feature;
-                // console.log('event feature: ', feature);
                 const name = feature.getProperty('name');
-                // console.log('nameProp: ', name);
                 const description = feature.getProperty('description');
-                // console.log('description: ', description);
-                const dateAndTime = feature.getProperty('dateAndTime') ? new Date(feature.getProperty('dateAndTime')).toLocaleString() : null ;
-                // console.log('dateAndTimeProp: ', feature.getProperty('dateAndTime'));
-                // console.log('Date from dateAndTimeProp: ', new Date(feature.getProperty('dateAndTime')));
-                // console.log('dateAndTime: ', dateAndTime);
-                const category = feature.getProperty('category');
-                // console.log('category: ', category);
 
                 const content = `
                 <div>
-                    <p>${dateAndTime || ''}</p>
-                    <h4 class="category">${category || ''}</h4>
-                    <p class="description">${description || ''}</p>
-                    
+                    <p class="description">${description || ''}</p>                    
                 </div>
                 `;
 
@@ -415,7 +414,7 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
         );
     }
 
-    private async getInitialGeoJSON(downloadUrl: string, fileName: string): Promise< FeatureCollection<Geometry | null, GeoJsonProperties> | null > {
+    private async getInitialGeoJSONFromKml(downloadUrl: string, fileName: string): Promise< FeatureCollection<Geometry | null, GeoJsonProperties> | null > {
         
         if(!downloadUrl) {
             return null;
@@ -425,26 +424,34 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
         console.log('file name fragments: ', fileNameFragments);
         const fileExtension = fileNameFragments && fileNameFragments[fileNameFragments.length - 1] || '';        
         console.log('file extension: ', fileExtension);
+        let extension: string | null = null;
 
         return fetch(downloadUrl)
-            .then(response => {
+            .then(async response => {
                 console.log('RESPONSE FROM FETCH CALL: ', response);
                 const contentDisposition = response.headers.get('Content-Disposition');
                 console.log('Content disposition: ', contentDisposition);
+                
                 if (contentDisposition) {
-                    const filenameMatch = /filename="(.+)"/.exec(contentDisposition);
-                    if (filenameMatch && filenameMatch[1]) {
-                        const filename = filenameMatch[1];
-                        const extension = filename.substring(filename.lastIndexOf('.') + 1);
-                        console.log('File Extension From Content Disposition:', extension);
+                    const filenamePart = contentDisposition.match(/filename="?([^"]+)"?/);
+                    console.log('fileNameMatch: ', filenamePart);
+                    if (filenamePart && filenamePart[1]) {
+                        const filename = filenamePart[1];
+                        const lastDotIndex = filename.lastIndexOf('.');
+
+                        if (lastDotIndex !== -1 && lastDotIndex < filename.length - 1) {
+                            extension = filename.substring(lastDotIndex + 1);
+                            console.log('File Extension From Content Disposition:', extension);
+                        }
                     }
                 }
 
-                return response.blob()
+                return response.blob();
             })
             .then(blob => blob.text())
             .then(fileText => {
                 console.log('FILE TEXT: ', fileText);
+                console.log('EXTENSION: ', extension);
 
                 if (fileExtension === 'json' || fileExtension === 'geojson') {
                     return JSON.parse(fileText);
@@ -453,7 +460,9 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
                     const kmlDoc = new DOMParser().parseFromString(fileText, 'text/xml');
                     console.log('fileDOC: ', kmlDoc);
                     const initialGeoJSON = toGeoJSON.kml(kmlDoc);
-    
+                    console.log('initial geoJSON: ', initialGeoJSON);
+                    const testGeoJSON = kml(kmlDoc);
+                    console.log('test geoJSON: ', JSON.stringify(testGeoJSON));
                     return initialGeoJSON;
                 } else {
                     console.error(`The file type .${fileExtension} is not supported.`);
@@ -489,13 +498,7 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
             const coords = (feature.geometry as Point)?.coordinates;
             const latLng = new google.maps.LatLng(coords[1], coords[0]);
 
-            // console.log('Event: ', event);
-
-            // console.log('feature: ', feature);
-            const geometry = feature.geometry;
-            // console.log('feature geometry: ', geometry);
             const dateAndTimeText = feature.properties?.['dateAndTime'] ? new Date(feature.properties?.['dateAndTime']).toLocaleString() : null ;
-            // console.log('dateAndTimeText: ', dateAndTimeText);
             const dateAndTimeFragments = dateAndTimeText?.split(',');
             const date = dateAndTimeFragments?.[0] || '';
             const time = (dateAndTimeFragments?.[1])?.trim() || '';
@@ -526,20 +529,14 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
             const markerContainer = document.createElement('div');
             markerContainer.style.position = 'relative';
 
-            // const pinElement = document.createElement('img');
-            // pinElement.src = this.context.resources.getResource("assets/default_marker.png"); // Default pin image
             const pinElement = document.createElement('div');
             pinElement.className = 'marker-pin';
-            // pinElement.style.background = "url('https://maps.gstatic.com/mapfiles/api-3/images/spotlight-poi3_hdpi.png')";
-            // pinElement.style.width = '26px'; // Adjust the size of the pin
-            // pinElement.style.height = '37px';
 
-            // Create the label element
             const labelElement = document.createElement('div');
             labelElement.className = 'marker-label';
+            labelElement.setAttribute('title', name);
             labelElement.innerHTML = `<p>${date || ''}</p><p>${time || ''}</p>`;
 
-            // Append the pin and label to the container
             markerContainer.appendChild(pinElement);
             markerContainer.appendChild(labelElement);
 
@@ -550,52 +547,92 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
                 gmpClickable: true,
             });
 
+            this.markers.push(marker);
             // if (dateAndTimeText) {
             //     marker.content = dateAndTimeTag;
             // }
             
-            marker.addListener('click', (event: any) => {
+            const markerClickListener = marker.addListener('click', (event: any) => {
                 this.infoWindow.close();
                 console.log('closed the info window!');
                 this.infoWindow.setContent(infoWindowContent);
                 this.infoWindow.setPosition(latLng);
                 this.infoWindow.setOptions({ pixelOffset: new google.maps.Size(0, -20), maxWidth: 265, minWidth: 240 } as any);
-                // this.infoWindow.setOptions({ maxWidth: 265, minWidth: 240 } as any);
                 (this.infoWindow as any).setHeaderContent(name);
                 this.infoWindow.open(this.map);
             });
+
+            this.eventListeners.push(markerClickListener);
         })      
     }
 
-    public updateView(context: ComponentFramework.Context<IInputs>): void {
+    public async updateView(context: ComponentFramework.Context<IInputs>): Promise<void> {
 
-        console.log('in update view!!!');
-        this.getLocationData( this.locationDataset).then(() => {
-            console.log('This KML URL: ', this.kmlUrl);
-            console.log('This GEOJSON: ', this.geoJSON);
+        console.log('CONTEXT in update view: ', context);
 
-            this.initializeMap();
+        if (this.initPromise) {
+            try {
+                await this.initPromise; // Wait for init to complete
+                console.log("init finished, updateView can continue");
 
-            this.attachClickEventListener();
+                this.geoJSON = this.getGeoJsonFromDataset(context.parameters.locationDataSet);
+                console.log('This GEOJSON: ', this.geoJSON);
+                    
+                if (!this.initialGeoJSON) {
+                    this.applyCenterAndZoomBoundsOnMap(this.geoJSON);
+                }
 
-            this.addGeoJSONOnMap(this.initialGeoJSON);
-            const centerAndZoomBounds = this.initialGeoJSON ? getCenterAndZoomGeoJsonBounds(this.initialGeoJSON) : 
-                this.geoJSON ? getCenterAndZoomGeoJsonBounds(this.geoJSON) : null;
-            
-            if (centerAndZoomBounds) {
-                this.map?.fitBounds(centerAndZoomBounds);
+                this.displayGeoJSONFromDataSet();
+            } catch (error) {
+                console.error("Error waiting for init:", error);
             }
+        } else {
+            console.log("init was not called yet");
+        }
 
-            this.map?.data.setStyle(geoJSONStyleHelper.setStylesByFeatureType);
 
-            this.displayGeoJSONFromDataSet();
-            console.log('adding listener in updateView');
 
-            return true;
-        }).catch(error => {
-            console.error("Error loading initial location data:", error);
-            throw error;
-        });  
+        // this.getLocationData(this.context.parameters.locationDataSet).then(() => {
+        //     console.log('This GEOJSON: ', this.geoJSON);
+
+        //     // this.initializeMap();
+
+        //     // this.attachClickEventListener();
+
+        //     // this.addGeoJSONOnMap(this.initialGeoJSON);
+        //     // const centerAndZoomBounds = this.initialGeoJSON ? getCenterAndZoomGeoJsonBounds(this.initialGeoJSON) : 
+        //     //     this.geoJSON ? getCenterAndZoomGeoJsonBounds(this.geoJSON) : null;
+            
+        //     if (!this.initialGeoJSON) {
+        //         this.applyCenterAndZoomBoundsOnMap(this.geoJSON);
+        //     }
+
+        //     // this.map?.data.setStyle(geoJSONStyleHelper.setStylesByFeatureType);
+
+        //     this.applyCenterAndZoomBoundsOnMap(this.geoJSON);
+
+        //     this.displayGeoJSONFromDataSet();
+        //     console.log('adding listener in updateView');
+
+        //     return true;
+        // }).catch(error => {
+        //     console.error("Error loading initial location data:", error);
+        //     throw error;
+        // });  
+    }
+
+    private applyCenterAndZoomBoundsOnMap(geoJSON: FeatureCollection<Geometry | null, GeoJsonProperties> | null ): void {
+        if (!geoJSON) {
+            return;
+        }
+
+        const centerAndZoomBounds = getCenterAndZoomGeoJsonBounds(geoJSON);
+        
+        if (centerAndZoomBounds) {
+            console.log('About to fit map bounds ', centerAndZoomBounds.toJSON());
+            this.map?.fitBounds(centerAndZoomBounds, 0);
+            console.log('Map bounds after fitting bounds: ', this.map?.getBounds()?.toJSON());
+        }
     }
 
 
@@ -605,6 +642,31 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
 
 
     public destroy(): void {
-        this.container.innerHTML = "";
+        this.eventListeners.forEach(listener => {
+            google.maps.event.removeListener(listener);
+        });
+        this.eventListeners = []; // Clear the array
+
+        // Remove all markers
+        this.markers.forEach(marker => {
+            marker.map = null; // Detach the marker from the map
+        });
+        this.markers = []; // Clear the array
+
+        if (this.map) {
+            google.maps.event.clearInstanceListeners(this.map);
+            this.map.unbindAll();
+            const mapContainer = this.map.getDiv();
+            if (mapContainer && mapContainer.parentNode) {
+                mapContainer.parentNode.removeChild(mapContainer); // Remove the map container from the DOM
+            }
+            this.map = null;    
+        }
+        
+        if (this.container) {
+            this.container.innerHTML = "";
+        }
+    
+        console.log('Component destroyed and resources cleaned up.');
     }
 }

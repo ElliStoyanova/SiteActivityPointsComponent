@@ -15,10 +15,8 @@
 
     <property name="googleApiKey" display-name-key="Google Api Key" description-key="Google_Api_Key" of-type="SingleLine.Text" usage="input" required="true" />
     <property name="initialLocationTableName" display-name-key="Initial Location Table Name" description-key="Initial_Location_Table_Name" of-type="SingleLine.Text" usage="input" required="false" />
-    <property name="initialFileUrlColumnName" display-name-key="Initial File Url Column Name" description-key="Initial_File_Url_Column_Name" of-type="SingleLine.Text" usage="input" required="false" />
+    <!-- <property name="initialFileUrlColumnName" display-name-key="Initial File Url Column Name" description-key="Initial_File_Url_Column_Name" of-type="SingleLine.Text" usage="input" required="false" /> -->
     <property name="initialFileColumnName" display-name-key="Initial File Column Name" description-key="Initial_File_Column_ Name" of-type="SingleLine.Text" usage="input" required="false" />
-    <property name="initialLatitudeColumnName" display-name-key="Initial Latitude Column Name" description-key="Initial_Latitude_Column_Name" of-type="SingleLine.Text" usage="input" required="false" />
-    <property name="initialLongitudeColumnName" display-name-key="Initial Longitude Column Name" description-key="Initial_Longitude_Column_Name" of-type="SingleLine.Text" usage="input" required="false" />
 
     <resources>
       <code path="index.ts" order="1"/>

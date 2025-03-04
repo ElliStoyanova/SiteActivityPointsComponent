@@ -34,9 +34,10 @@
     left: 30px;
     color: #cc0000;
     background-color: transparent;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: bold;
     white-space: nowrap;
+    text-shadow: -1px -1px 0 white, 1px -1px 0 white, -1px 1px 0 white, 1px 1px 0 white;
 }
 
 

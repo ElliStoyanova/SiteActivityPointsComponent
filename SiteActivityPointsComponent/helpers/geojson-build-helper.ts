@@ -1,4 +1,4 @@
-import { Point, Feature, FeatureCollection, GeoJsonProperties } from 'geojson';
+import { Point, Feature, FeatureCollection, GeoJsonProperties, Geometry } from 'geojson';
 
 // export interface GeoJsonPoint {
 //     type: "Point";
@@ -49,7 +49,7 @@ export function createGeoJsonFeatureCollection(
     };
 }
 
-export function generateGeoJson(coordinates: { latitude: number; longitude: number; properties: GeoJsonProperties }[]): FeatureCollection {
+export function generateGeoJson(coordinates: { latitude: number; longitude: number; properties: GeoJsonProperties }[]): FeatureCollection<Geometry, GeoJsonProperties> {
     const features: Feature[] = coordinates.map((coord) =>
         createGeoJsonFeature(coord.longitude, coord.latitude, coord.properties)
     );

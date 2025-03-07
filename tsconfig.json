@@ -11,10 +11,7 @@
         "jsx": "react",
         "allowSyntheticDefaultImports": true,
         "typeRoots": ["node_modules/@types"],
-        "baseUrl": ".",
-        "paths": {
-            "@assets/*": ["SiteActivityPointsComponent/assets/*"]
-        }
+        "baseUrl": "."
     },
     "include": [
         "**/*.ts",

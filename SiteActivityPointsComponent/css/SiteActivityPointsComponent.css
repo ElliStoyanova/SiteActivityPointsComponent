@@ -12,15 +12,7 @@
     overflow: auto;
 }
 
-/* .date-and-time-tag {
-    background-color: transparent;
-    border-radius: 4px;
-    color: #cc0000;
-    font-size: 11px;
-} */
-
 .marker-pin {
-    background-image: url(https://maps.gstatic.com/mapfiles/api-3/images/spotlight-poi3_hdpi.png);
     background-size: contain;
     background-repeat: no-repeat;
     /* Immitate the width and height of the default Google Maps pin: */
@@ -36,29 +28,17 @@
     background-color: transparent;
     font-size: 12px;
     font-weight: bold;
-    white-space: nowrap;
-    text-shadow: -1px -1px 0 white, 1px -1px 0 white, -1px 1px 0 white, 1px 1px 0 white;
+    max-width: 150px;
+    width: 120px;
+    text-shadow: -1px -1px 1px white, 1px -1px 1px white, -1px 1px 1px white, 1px 1px 1px white;
 }
 
-
-/* .date-and-time-tag {
-    background-color: #e84242;
-    border-radius: 4px;
-    color: white;
-    font-size: 11px;
-    padding: 4px 8px;
-    position: relative;
-} */
-  
-/* .date-and-time-tag::after {
-    content: "";
-    position: absolute;
-    left: 50%;
-    top: auto;
-    transform: translate(-50%, 0);
-    width: 0;
-    height: 0;
-    border-left: 8px solid transparent;
-    border-right: 8px solid transparent;
-    border-top: 16px solid #e84242;
-} */
+.marker-label-long-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    word-break: break-word; 
+    padding-left: 2px;
+}

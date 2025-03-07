@@ -1,6 +1,9 @@
-import { defaultIconUrl } from '../configuration/configuration'
+import { FeatureCollection, GeoJsonProperties, Geometry } from 'geojson';
 
 export function setStylesByFeatureType(feature: any) {
+    if (!feature) {
+        return {};
+    }
 
     const geometry = feature.getGeometry();
     const geometryType = geometry?.getType();
@@ -8,43 +11,41 @@ export function setStylesByFeatureType(feature: any) {
     switch(geometryType) {
         case 'Point':
         case 'MultiPoint': {
-            const iconUrl = feature.getProperty('icon');
+            const icon = feature.getProperty('icon');
             const title = feature.getProperty('name');
 
-            // const isValidIconUrl = await isIconUrlValid(iconUrl);
-
             return {
-                icon: iconUrl,
+                icon,
                 title
             }
         }
         case 'LineString':
         case 'MultiLineString': {
-            const stroke = feature.getProperty('stroke') || '#000000';
+            const strokeColor = feature.getProperty('stroke') || '#000000';
             const strokeOpacity = feature.getProperty('stroke-opacity') || 1;
-            const strokeWidth = feature.getProperty('stroke-width') || 1;
+            const strokeWeight = feature.getProperty('stroke-width') || 1;
 
             return {
-                strokeColor: stroke,
-                strokeOpacity: strokeOpacity,
-                strokeWeight: strokeWidth
+                strokeColor,
+                strokeOpacity,
+                strokeWeight
             };
         }
         
         case 'Polygon':
         case 'MultiPolygon': {
-            const stroke = feature.getProperty('stroke') || '#000000';
+            const strokeColor = feature.getProperty('stroke') || '#000000';
             const strokeOpacity = feature.getProperty('stroke-opacity') || 1;
-            const strokeWidth = feature.getProperty('stroke-width') || 1;
+            const strokeWeight = feature.getProperty('stroke-width') || 1;
             const fillOpacity = feature.getProperty('fill-opacity') || 0.5;
             const fillColor = feature.getProperty('fill') || '#000000';
 
             return {
                 fillOpacity,
                 fillColor,
-                strokeColor: stroke,
-                strokeOpacity: strokeOpacity,
-                strokeWeight: strokeWidth
+                strokeColor,
+                strokeOpacity,
+                strokeWeight
             };
         }
 
@@ -54,11 +55,50 @@ export function setStylesByFeatureType(feature: any) {
     }
 }
 
-function isIconUrlValid(url: string) {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => resolve(true); // URL is valid
-      img.onerror = () => resolve(false); // URL is invalid
-      img.src = url;
-    });
+async function validateIconUrl(url: string): Promise<boolean> {
+    try {
+        const response = await fetch(url, { method: "HEAD" });
+        console.log('RESPONSE FROM HEAD REQUEST: ', response);
+        return response.ok;
+    } catch (error) {
+        console.log('ERROR GETTING ICON URL: ', error);
+        return false;
+    }
+}
+
+export async function preprocessGeoJSON(geoJSON: FeatureCollection<Geometry | null, GeoJsonProperties> | null, defaultIconUrl: string): 
+    Promise<FeatureCollection<Geometry | null, GeoJsonProperties> | null> {
+    
+    if (!geoJSON) {
+        return null;
+    }
+    
+    const features = geoJSON.features;
+    const checkedUrls: Record<string, boolean> = {};
+
+    const pointFeaturesWithIconUrl = features.filter(feature => feature?.geometry?.type === 'Point' && feature?.properties?.['icon']);
+
+    for (const feature of pointFeaturesWithIconUrl) {
+
+        const iconUrl = feature?.properties?.['icon'];
+        console.log('Icon url: ', iconUrl);
+
+        if (feature.properties && iconUrl in checkedUrls && !checkedUrls[iconUrl]) {
+            feature.properties.icon = defaultIconUrl;
+        } else if (feature.properties && !(iconUrl in checkedUrls)) {
+            const isValid = await validateIconUrl(iconUrl);
+            
+            if (!isValid) {
+                feature.properties.icon = defaultIconUrl;
+            }
+            
+            console.log('Is valid? ', isValid);
+    
+            checkedUrls[iconUrl] = isValid;
+        }  
+    }
+
+    console.log('checked urls: ', checkedUrls);
+
+    return geoJSON;
 }

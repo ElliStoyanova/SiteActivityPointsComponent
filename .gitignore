@@ -6,6 +6,9 @@
 # generated directory
 **/generated
 
+# Solutions directory
+**/Solutions
+
 # output directory
 /out
 

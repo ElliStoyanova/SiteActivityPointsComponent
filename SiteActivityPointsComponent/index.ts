@@ -1,13 +1,13 @@
 import { IInputs, IOutputs } from './generated/ManifestTypes';
 import * as geoJSONBuildHelper from './helpers/geojson-build-helper';
 import * as geoJSONStyleHelper from './helpers/geojson-style-helper';
+import * as markerHelper from './helpers/marker-helper';
+import { FeatureCollection, GeoJsonProperties, Geometry, Point } from 'geojson';
+import { FeatureProperty, MarkerLabelProperty } from './interfaces/interfaces';
+import { getInitialGeoJSONFromFile } from './helpers/file-download-helper';
 import { getCenterAndZoomGeoJsonBounds } from './helpers/geojson-center-and-zoom-helper';
 import * as config from './configuration/configuration';
-import toGeoJSON from '@mapbox/togeojson';
-import * as geoXML3 from 'geoxml3';
-import { FeatureCollection, GeoJsonProperties, Geometry, Point } from 'geojson';
-import { kml } from "@tmcw/togeojson";
-import { MarkerWithLabel } from '@googlemaps/markerwithlabel';
+
 
 
 export class SiteActivityPointsComponent implements ComponentFramework.StandardControl<IInputs, IOutputs> {
@@ -17,14 +17,13 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
 
     private map: google.maps.Map | null = null;
     private AdvancedMarkerElement: typeof google.maps.marker.AdvancedMarkerElement | null = null;
-    private infoWindow = new google.maps.InfoWindow({
-        content: ''
-    });
-    private kmlUrl: string | null = null;
+    private infoWindow: google.maps.InfoWindow;
     private initialGeoJSON: FeatureCollection<Geometry | null, GeoJsonProperties> | null;
     private geoJSON: FeatureCollection | null;
     private initialLocationTableName: string;
     private initialFileColumnName: string;
+    private mapId: string;
+    private markerLabelProp: MarkerLabelProperty;
     private initPromise: Promise<void> | null = null;
     private markers: google.maps.marker.AdvancedMarkerElement[] = [];
     private eventListeners: google.maps.MapsEventListener[] = [];
@@ -41,12 +40,10 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
         this.context = context;
 
         console.log('CONTEXT in init: ', this.context);
-
-        this.container.style.width = "100%";
-        this.container.style.height = "800px";   
+  
+        this.setContainerSize();
         this.initializeParameters();     
         console.log('Params initialLocationTableName: ', this.initialLocationTableName);
-        // console.log('Params initialFileUrlColumnName: ', this.initialFileUrlColumnName);
 
         this.initPromise = new Promise<void>((resolve, reject) => {
 
@@ -58,11 +55,15 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
                 .then(({ AdvancedMarkerElement }) => {
                     this.AdvancedMarkerElement = AdvancedMarkerElement;
                     this.initializeMap();
+                    this.initializeInfoWindow();
                     this.attachClickEventListener();
                     return this.getInitialGeoJSON();
                 })
                 .then((initialGeoJSON) => {
-                    this.initialGeoJSON = initialGeoJSON;
+                    return geoJSONStyleHelper.preprocessGeoJSON(initialGeoJSON, config.defaultIconUrl);
+                })
+                .then((preprocessedGeoJSON) => {
+                    this.initialGeoJSON = preprocessedGeoJSON;
                     console.log('INITIAL GEOJSON IN INIT(): ', JSON.stringify(this.initialGeoJSON));
                     this.addGeoJSONOnMap(this.initialGeoJSON);
                     this.applyCenterAndZoomBoundsOnMap(this.initialGeoJSON);
@@ -75,43 +76,26 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
                     console.error('Initialization error:', error);
                     reject(error);
                     return;
-                });
-            // try {
-            //     await this.loadGoogleMaps(this.context.parameters.googleApiKey.raw as string);
-            //     console.log('Google Maps API loaded successfully.');
-
-            //     const { AdvancedMarkerElement } = await google.maps.importLibrary('marker') as google.maps.MarkerLibrary;
-            //     this.AdvancedMarkerElement = AdvancedMarkerElement;
-        
-            //     this.initializeMap();
-        
-            //     this.attachClickEventListener();
-        
-            //     this.initialGeoJSON = await this.getInitialGeoJSON();
-        
-            //     console.log('INITIAL GEOJSON IN INIT(): ', JSON.stringify(this.initialGeoJSON));
-        
-            //     this.addGeoJSONOnMap(this.initialGeoJSON);
-        
-            //     this.applyCenterAndZoomBoundsOnMap(this.initialGeoJSON);
-        
-            //     this.applyInitialGeoJSONStyles();  
-
-            //     console.log('EVERYTHING IN INIT COMPLETED!');
-            //     resolve();
-            // } catch (error) {
-            //     console.error('Initialization error:', error);
-            //     reject(error);
-            // }            
+            });           
         });
 
         return this.initPromise;                    
     }
 
+    private setContainerSize(): void {
+        this.container.style.width = "100%";
+        this.container.style.height = "800px"; 
+    }
+
     private initializeParameters(): void {
-        this.initialLocationTableName = this.context.parameters.initialLocationTableName.raw as string || config.initialLocationTableName;
-        this.initialFileColumnName = this.context.parameters.initialFileColumnName.raw as string || config.initialFileColumnName;
-        // this.initialFileUrlColumnName = this.context.parameters.initialFileUrlColumnName.raw as string || config.initialFileUrlColumnName;
+        this.initialLocationTableName = this.context.parameters.initialLocationTableName?.raw as string || config.initialLocationTableName;
+        this.initialFileColumnName = this.context.parameters.initialFileColumnName?.raw as string || config.initialFileColumnName;
+        this.mapId = this.context.parameters.mapId?.raw as string || config.mapId;
+        this.markerLabelProp = this.context.parameters.markerLabelProperty?.raw as MarkerLabelProperty || MarkerLabelProperty.Date;
+    }
+
+    private initializeInfoWindow(): void {
+        this.infoWindow = new google.maps.InfoWindow();
     }
 
     private applyInitialGeoJSONStyles(): void {
@@ -120,15 +104,7 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
             return;
         }
 
-        this.map?.data.setStyle(geoJSONStyleHelper.setStylesByFeatureType);  
-    }
-
-    private async getInitialGeoJSON(): Promise<FeatureCollection<Geometry | null, GeoJsonProperties> | null> {
-        const initialLocationEntityId = this.getInitialLocationEntityId();
-        const initialLocationData = await this.getInitialLocationData(initialLocationEntityId);
-        
-        console.log ('initial location data: ', initialLocationData);
-        return initialLocationData?.initialGeoJSON || null;        
+        this.map?.data?.setStyle(geoJSONStyleHelper.setStylesByFeatureType);  
     }
  
     private getGeoJsonFromDataset(dataset: ComponentFramework.PropertyTypes.DataSet): FeatureCollection<Geometry, GeoJsonProperties> | null {
@@ -136,21 +112,23 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
             
             const coordinates = dataset.sortedRecordIds.reduce(
                 (arr: { latitude: number; longitude: number; properties: GeoJsonProperties }[], recordId) => {
+
                 const record = dataset.records[recordId];
+
                 arr.push({
                     latitude: (record.getValue('latitude') as number),
                     longitude: (record.getValue('longitude') as number),
                     properties: {
-                        name: record.getValue('name') as string,
-                        description: record.getValue('description') as string,
-                        category: (record.getValue('category') as any)?.name || null,
-                        dateAndTime: record.getValue('dateAndTime') || null
+                        [FeatureProperty.Name]: record.getValue('name') as string,
+                        [FeatureProperty.Description]: record.getValue('description') as string,
+                        [FeatureProperty.Category]: (record.getValue('category') as any)?.name || null,
+                        [FeatureProperty.DateAndTime]: record.getValue('dateAndTime') || null
                     }
                 });
                 return arr;
             },[]);
 
-            return coordinates.length ? geoJSONBuildHelper.generateGeoJson(coordinates) : null;
+            return coordinates.length ? geoJSONBuildHelper.createGeoJson(coordinates) : null;
         }
 
         return null;
@@ -162,22 +140,25 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
         return entityTypeName === this.initialLocationTableName ? (this.context as any).page?.entityId : null;
     }
 
-    private async getInitialLocationData(initialLocationEntityId: string | null): 
-        Promise<{ kmlUrl: string | null, initialGeoJSON: FeatureCollection<Geometry | null, GeoJsonProperties> | null } | null> {
+    private async getInitialGeoJSON(): 
+        Promise<FeatureCollection<Geometry | null, GeoJsonProperties> | null> {
+
+        const initialLocationEntityId = this.getInitialLocationEntityId();
+        
         if (!initialLocationEntityId) {
             return null;
         }
 
         try {
-            return await this.getInitialLocationDataFromLinkedEntityFile(initialLocationEntityId);            
+            return await this.getInitialGeoJSONFromLinkedEntityFile(initialLocationEntityId);            
         } catch (error) {
             console.log('Error getting Url: ', error); 
             return null;
         }
     }
 
-    private async getInitialLocationDataFromLinkedEntityFile(entityId: string): 
-        Promise<{ kmlUrl: string | null, initialGeoJSON: FeatureCollection<Geometry | null, GeoJsonProperties> | null } | null> {
+    private async getInitialGeoJSONFromLinkedEntityFile(entityId: string): 
+        Promise< FeatureCollection<Geometry | null, GeoJsonProperties> | null> {
         
         const orgUrl = (this.context as any).page.getClientUrl();
         console.log('ORG URL: ', orgUrl);
@@ -190,55 +171,26 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
             );
 
             console.log('Results from API call: ', results);
-
             
             const downloadUrl = `${orgUrl}/${config.apiDataVersionUrlFragment}/${this.initialLocationTableName}s(${entityId})/${this.initialFileColumnName}/$value`;
 
             console.log('Download Url: ', downloadUrl);
 
-            // const { kmlUrl, initialGeoJSON }  = await this.getKmlFromFile(downloadUrl);
-            // console.log('KML Url from blob: ', kmlUrl);
-            // const kmlUrl = await this.getKmlFromFile(results[this.initialFileColumnName]);
-
             const fileName = results[`${this.initialFileColumnName}_name`];
-            const initialGeoJSON = results[this.initialFileColumnName] ? await this.getInitialGeoJSONFromKml(downloadUrl, fileName): null;            
+            const fileNameFragments = fileName?.split('.');
+            console.log('file name fragments: ', fileNameFragments);
+            const fileExtension = fileNameFragments && fileNameFragments[fileNameFragments.length - 1] || '';        
+            console.log('file extension: ', fileExtension);
 
-            if (results) {
-                return {
-                    kmlUrl: null,
-                    initialGeoJSON
-                }
-            } else {
-                return null;
-            }
+            const initialGeoJSON = results[this.initialFileColumnName] ? await getInitialGeoJSONFromFile(downloadUrl, fileExtension): null;            
+
+            return results ? initialGeoJSON : null;
+
         } catch (error) {
             console.error('Error retrieving initial location data:', error);
             return null;
         }
     }
-
-    // private async getInitialLocationDataFromLinkedEntityUrl(entityId: string): Promise<{ kmlUrl: string } | null> {
-    //     try {
-    //         const results = await this.context.webAPI.retrieveRecord(
-    //             this.initialLocationTableName,
-    //             entityId,
-    //             `?$select=${this.initialFileUrlColumnName}`
-    //         );
-
-    //         console.log('Results from API call: ', results);
-
-    //         if (results) {
-    //             return {
-    //                 kmlUrl: results[this.initialFileUrlColumnName]
-    //             }
-    //         } else {
-    //             return null;
-    //         }
-    //     } catch (error) {
-    //         console.error("Error retrieving initial location data:", error);
-    //         return null;
-    //     }
-    // }
 
     private loadGoogleMaps(googleApiKey: string): Promise<void> {
         return new Promise((resolve, reject) => {
@@ -266,28 +218,6 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
         });
     }
 
-
-    private getGoogleDriveFileId(url: string | null) {
-
-        if (!url) {
-            return null;
-        }
-
-        const regex = /\/d\/([^/]+)/; // Regular expression to match /d/ and capture the ID
-        const match = url.match(regex);
-
-        if (match && match[1]) {
-          return match[1];
-        } else {
-          return null; // Or handle the case where the ID is not found
-        }
-
-    }
-
-    private getGoogleDriveDownloadLink(fileId: string | null): string {
-        return fileId ? `https://drive.google.com/uc?export=download&id=${fileId}` : '';
-    }
-
     private initializeMap(): void {
         
         console.log('IN INITIALZE MAP CONTAINER: ', this.container);
@@ -295,82 +225,11 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
         if (!this.container) return;
 
         this.map = new google.maps.Map(this.container, {
-            center: { lat: 0, lng: 0 }, 
-            // zoom: this.initialZoom,
-            mapId: 'DEMO_MAP_ID'
-        } as any);
+            center: { lat: 0, lng: 0 },
+            mapId: this.mapId
+        });
         
         console.log('MAP: ', this.map);
-    }
-
-    private attachMapTypeIdChangeListener(): void {
-        this.map?.addListener('maptypeid_changed', () => {
-            const currentMapTypeId =this.map?.getMapTypeId();
-            if (currentMapTypeId === 'satellite') {
-                console.log("User switched to satellite view.");
-            } else {
-                console.log("User switched from satellite view to: " + currentMapTypeId);
-            }
-        });
-    }
-
-    private addKmlLayer(kmlUrl: string | null): void {
-        if (!this.map || !this.kmlUrl) return;
-
-        const kmlLayer = new google.maps.KmlLayer({
-            url: this.kmlUrl,
-            map: this.map,
-            preserveViewport: true,
-            suppressInfoWindows: false
-        });
-
-        kmlLayer.addListener("status_changed", () => {
-            if (kmlLayer.getStatus() !== "OK") {
-                console.error("Error loading KML:", kmlLayer.getStatus());
-            }
-        });
-
-        console.log('z-index of the kml layer: ', kmlLayer.getZIndex());
-    }
-
-    private attachAddFeatureEventListener(): void {
-        
-        if (!this.map) {
-            return;
-        }
-
-        this.map.data.addListener('addfeature', (event: any) => {
-            console.log('Event: ', event);
-
-            const feature = event.feature;
-            console.log('event feature: ', feature);
-            const geometry = feature.getGeometry();
-            console.log('event feature geometry: ', geometry);
-            const geometryType = geometry.getType();
-            console.log('event feature type: ', geometryType);
-            const dateAndTimeText = feature.getProperty('dateAndTime') ? new Date(feature.getProperty('dateAndTime')).toLocaleString() : null ;
-            console.log('event dateAndTimeText: ', dateAndTimeText);
-      
-            if (geometryType === 'Point' && dateAndTimeText) {
-                const position = geometry.get();
-
-                const label = document.createElement("div");
-                label.textContent = dateAndTimeText; // Set the label text
-                label.style.color = "white";
-                label.style.backgroundColor = "black";
-                label.style.padding = "5px";
-                label.style.borderRadius = "5px";
-                label.style.fontSize = "12px";
-      
-                // Create a marker with a label
-                new this.AdvancedMarkerElement!({
-                    position,
-                    map: (this.map as any),
-                    content: label
-                });
-                // console.log('Marker: ', marker);
-            }
-        });
     }
 
     private attachClickEventListener(): void {
@@ -380,33 +239,30 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
 
         this.map.data.addListener('click', (event: any) => {
                 this.infoWindow.close();
-
-                // console.log('Event: ', event);
+                
                 const feature = event.feature;
-                const name = feature.getProperty('name');
-                const description = feature.getProperty('description');
+                
+                if (!feature) {
+                    return;
+                }
+                
+                const name = feature.getProperty(FeatureProperty.Name);
+                const description = feature.getProperty(FeatureProperty.Description);
 
-                const content = `
-                <div>
-                    <p class="description">${description || ''}</p>                    
-                </div>
-                `;
+                const infoWindowContent = markerHelper.createInfoWindowContent(description);
 
-                const geometry = event.feature.getGeometry();
+                const geometry = feature.getGeometry();
                 console.log('get geometry: ', geometry);
 
-                const geometryType = geometry.getType();
+                const geometryType = geometry?.getType();
                 console.log('geometryType: ', geometryType);
 
                 const geometryPosition = geometryType === 'Point' ? geometry?.get() : event.latLng;
                 console.log('get geomertry get: ', geometryPosition);
 
-                this.infoWindow.setContent(content);
-                this.infoWindow.setPosition(geometryPosition);
-                this.infoWindow.setOptions({ pixelOffset: new google.maps.Size(0, -20), maxWidth: 265, minWidth: 240 } as any);
-                (this.infoWindow as any).setHeaderContent(name);
+                if (infoWindowContent || name) {
+                    this.setupInfoWindow(infoWindowContent, geometryPosition, name);
             
-                if (this.map) {
                     console.log('ABOUT TO OPEN INFO WINDOW')
                     this.infoWindow.open(this.map);
                 } 
@@ -414,67 +270,13 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
         );
     }
 
-    private async getInitialGeoJSONFromKml(downloadUrl: string, fileName: string): Promise< FeatureCollection<Geometry | null, GeoJsonProperties> | null > {
-        
-        if(!downloadUrl) {
-            return null;
-        }
-
-        const fileNameFragments = fileName?.split('.');
-        console.log('file name fragments: ', fileNameFragments);
-        const fileExtension = fileNameFragments && fileNameFragments[fileNameFragments.length - 1] || '';        
-        console.log('file extension: ', fileExtension);
-        let extension: string | null = null;
-
-        return fetch(downloadUrl)
-            .then(async response => {
-                console.log('RESPONSE FROM FETCH CALL: ', response);
-                const contentDisposition = response.headers.get('Content-Disposition');
-                console.log('Content disposition: ', contentDisposition);
-                
-                if (contentDisposition) {
-                    const filenamePart = contentDisposition.match(/filename="?([^"]+)"?/);
-                    console.log('fileNameMatch: ', filenamePart);
-                    if (filenamePart && filenamePart[1]) {
-                        const filename = filenamePart[1];
-                        const lastDotIndex = filename.lastIndexOf('.');
-
-                        if (lastDotIndex !== -1 && lastDotIndex < filename.length - 1) {
-                            extension = filename.substring(lastDotIndex + 1);
-                            console.log('File Extension From Content Disposition:', extension);
-                        }
-                    }
-                }
-
-                return response.blob();
-            })
-            .then(blob => blob.text())
-            .then(fileText => {
-                console.log('FILE TEXT: ', fileText);
-                console.log('EXTENSION: ', extension);
-
-                if (fileExtension === 'json' || fileExtension === 'geojson') {
-                    return JSON.parse(fileText);
-                } else if (fileExtension === 'kml') {
-                    console.log('GEOXML 3', geoXML3);
-                    const kmlDoc = new DOMParser().parseFromString(fileText, 'text/xml');
-                    console.log('fileDOC: ', kmlDoc);
-                    const initialGeoJSON = toGeoJSON.kml(kmlDoc);
-                    console.log('initial geoJSON: ', initialGeoJSON);
-                    const testGeoJSON = kml(kmlDoc);
-                    console.log('test geoJSON: ', JSON.stringify(testGeoJSON));
-                    return initialGeoJSON;
-                } else {
-                    console.error(`The file type .${fileExtension} is not supported.`);
-                    return null;
-                }                            
-            })
-            .catch(error => {
-                console.error("Error downloading or parsing KML:", error);
-                return null;
-            });
+    private setupInfoWindow(content: string | Element | null, position: google.maps.LatLng | null, headerContent: string): void {
+        this.infoWindow.setContent(content);
+        this.infoWindow.setPosition(position);
+        this.infoWindow.setOptions({ pixelOffset: new google.maps.Size(0, -20), maxWidth: config.maxInfoWindowWidthInPx, minWidth: config.minInfoWindowWidthInPx });
+        (this.infoWindow as any).setHeaderContent(headerContent);
     }
-
+ 
     private addGeoJSONOnMap(geoJSON: FeatureCollection<Geometry | null, GeoJsonProperties> | null): void {
         if (!geoJSON || !this.map) {
             return;
@@ -498,72 +300,45 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
             const coords = (feature.geometry as Point)?.coordinates;
             const latLng = new google.maps.LatLng(coords[1], coords[0]);
 
-            const dateAndTimeText = feature.properties?.['dateAndTime'] ? new Date(feature.properties?.['dateAndTime']).toLocaleString() : null ;
-            const dateAndTimeFragments = dateAndTimeText?.split(',');
-            const date = dateAndTimeFragments?.[0] || '';
-            const time = (dateAndTimeFragments?.[1])?.trim() || '';
-            const name = feature.properties?.['name'];
-            const description = feature.properties?.['description'];
-            const category = feature.properties?.['category'];
+            const dateAndTimeText = feature.properties?.[FeatureProperty.DateAndTime] ? new Date(feature.properties?.[FeatureProperty.DateAndTime]).toLocaleString() : undefined ;
+            const name = feature.properties?.[FeatureProperty.Name];
+            const description = feature.properties?.[FeatureProperty.Description];
+            const category = feature.properties?.[FeatureProperty.Category];
 
-            const infoWindowContent = `
-            <div>
-                <p>${dateAndTimeText || ''}</p>
-                <h4 class="category">${category || ''}</h4>
-                <p class="description">${description || ''}</p>                
-            </div>`;
+            const infoWindowContent = markerHelper.createInfoWindowContent(description, dateAndTimeText, category);
 
-            const dateAndTimeTag = document.createElement('div');
-            dateAndTimeTag.className = 'date-and-time-tag';
-            dateAndTimeTag.innerHTML = `<p>${date || ''}</p><p>${time || ''}</p>`;
+            const markerContent = markerHelper.createMarkerContent(feature.properties, this.markerLabelProp);
 
-            // const marker = new MarkerWithLabel({
-            //     position: latLng,
-            //     clickable: true,
-            //     map: this.map,
-            //     labelContent: dateAndTimeTag, // can also be HTMLElement
-            //     labelAnchor: new google.maps.Point(18, -30),
-            //     labelClass: 'date-and-time-tag'
-            // });
+            const marker = this.createMarkerElement(latLng, markerContent, true);
 
-            const markerContainer = document.createElement('div');
-            markerContainer.style.position = 'relative';
-
-            const pinElement = document.createElement('div');
-            pinElement.className = 'marker-pin';
-
-            const labelElement = document.createElement('div');
-            labelElement.className = 'marker-label';
-            labelElement.setAttribute('title', name);
-            labelElement.innerHTML = `<p>${date || ''}</p><p>${time || ''}</p>`;
-
-            markerContainer.appendChild(pinElement);
-            markerContainer.appendChild(labelElement);
-
-            const marker = new this.AdvancedMarkerElement!({
-                position: latLng,
-                map: this.map,
-                content: markerContainer,
-                gmpClickable: true,
-            });
-
-            this.markers.push(marker);
-            // if (dateAndTimeText) {
-            //     marker.content = dateAndTimeTag;
-            // }
+            if (marker) {
+                this.markers.push(marker);
+            }
             
-            const markerClickListener = marker.addListener('click', (event: any) => {
+            const markerClickListener = marker?.addListener('gmp-click', () => {
                 this.infoWindow.close();
                 console.log('closed the info window!');
-                this.infoWindow.setContent(infoWindowContent);
-                this.infoWindow.setPosition(latLng);
-                this.infoWindow.setOptions({ pixelOffset: new google.maps.Size(0, -20), maxWidth: 265, minWidth: 240 } as any);
-                (this.infoWindow as any).setHeaderContent(name);
+                this.setupInfoWindow(infoWindowContent, latLng, name);
                 this.infoWindow.open(this.map);
             });
 
-            this.eventListeners.push(markerClickListener);
+            if (markerClickListener) {
+                this.eventListeners.push(markerClickListener);
+            }
         })      
+    }
+
+    private createMarkerElement(position: google.maps.LatLng, content: Node | null | undefined, clickable: boolean): google.maps.marker.AdvancedMarkerElement | null {
+        if (!this.map || !position) {
+            return null;
+        }
+
+        return new this.AdvancedMarkerElement!({
+            position,
+            map: this.map,
+            content,
+            gmpClickable: clickable
+        });
     }
 
     public async updateView(context: ComponentFramework.Context<IInputs>): Promise<void> {
@@ -577,10 +352,8 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
 
                 this.geoJSON = this.getGeoJsonFromDataset(context.parameters.locationDataSet);
                 console.log('This GEOJSON: ', this.geoJSON);
-                    
-                if (!this.initialGeoJSON) {
-                    this.applyCenterAndZoomBoundsOnMap(this.geoJSON);
-                }
+
+                this.applyCenterAndZoomBoundsOnMap(this.geoJSON);
 
                 this.displayGeoJSONFromDataSet();
             } catch (error) {
@@ -589,36 +362,6 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
         } else {
             console.log("init was not called yet");
         }
-
-
-
-        // this.getLocationData(this.context.parameters.locationDataSet).then(() => {
-        //     console.log('This GEOJSON: ', this.geoJSON);
-
-        //     // this.initializeMap();
-
-        //     // this.attachClickEventListener();
-
-        //     // this.addGeoJSONOnMap(this.initialGeoJSON);
-        //     // const centerAndZoomBounds = this.initialGeoJSON ? getCenterAndZoomGeoJsonBounds(this.initialGeoJSON) : 
-        //     //     this.geoJSON ? getCenterAndZoomGeoJsonBounds(this.geoJSON) : null;
-            
-        //     if (!this.initialGeoJSON) {
-        //         this.applyCenterAndZoomBoundsOnMap(this.geoJSON);
-        //     }
-
-        //     // this.map?.data.setStyle(geoJSONStyleHelper.setStylesByFeatureType);
-
-        //     this.applyCenterAndZoomBoundsOnMap(this.geoJSON);
-
-        //     this.displayGeoJSONFromDataSet();
-        //     console.log('adding listener in updateView');
-
-        //     return true;
-        // }).catch(error => {
-        //     console.error("Error loading initial location data:", error);
-        //     throw error;
-        // });  
     }
 
     private applyCenterAndZoomBoundsOnMap(geoJSON: FeatureCollection<Geometry | null, GeoJsonProperties> | null ): void {
@@ -632,6 +375,7 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
             console.log('About to fit map bounds ', centerAndZoomBounds.toJSON());
             this.map?.fitBounds(centerAndZoomBounds, 0);
             console.log('Map bounds after fitting bounds: ', this.map?.getBounds()?.toJSON());
+            console.log('Map after fitting bounds: ', this.map);
         }
     }
 
@@ -645,26 +389,24 @@ export class SiteActivityPointsComponent implements ComponentFramework.StandardC
         this.eventListeners.forEach(listener => {
             google.maps.event.removeListener(listener);
         });
-        this.eventListeners = []; // Clear the array
+        this.eventListeners = [];
 
-        // Remove all markers
         this.markers.forEach(marker => {
-            marker.map = null; // Detach the marker from the map
+            marker.map = null;
         });
-        this.markers = []; // Clear the array
+        this.markers = [];
 
         if (this.map) {
             google.maps.event.clearInstanceListeners(this.map);
-            this.map.unbindAll();
             const mapContainer = this.map.getDiv();
             if (mapContainer && mapContainer.parentNode) {
-                mapContainer.parentNode.removeChild(mapContainer); // Remove the map container from the DOM
+                mapContainer.parentNode.removeChild(mapContainer);
             }
             this.map = null;    
         }
         
         if (this.container) {
-            this.container.innerHTML = "";
+            this.container.innerHTML = '';
         }
     
         console.log('Component destroyed and resources cleaned up.');

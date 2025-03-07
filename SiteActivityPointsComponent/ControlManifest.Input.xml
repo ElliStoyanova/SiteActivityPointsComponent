@@ -17,6 +17,8 @@
     <property name="initialLocationTableName" display-name-key="Initial Location Table Name" description-key="Initial_Location_Table_Name" of-type="SingleLine.Text" usage="input" required="false" />
     <!-- <property name="initialFileUrlColumnName" display-name-key="Initial File Url Column Name" description-key="Initial_File_Url_Column_Name" of-type="SingleLine.Text" usage="input" required="false" /> -->
     <property name="initialFileColumnName" display-name-key="Initial File Column Name" description-key="Initial_File_Column_ Name" of-type="SingleLine.Text" usage="input" required="false" />
+    <property name="mapId" display-name-key="Map Id" description-key="Map_Id" of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="markerLabelProperty" display-name-key="Marker Label Property" description-key="Marker_Label_Property" of-type="SingleLine.Text" usage="input" required="false"/>
 
     <resources>
       <code path="index.ts" order="1"/>

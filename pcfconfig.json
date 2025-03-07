@@ -6,8 +6,5 @@
     "controlName": "SiteActivityPointsComponent",
     "description": "My PCF Component",
     "codePath": "src/index.ts",
-    "outDir": "./out/controls",
-    "assets": {
-        "assets": "SiteActivityPointsComponent/assets"
-    }
+    "outDir": "./out/controls"
 }
